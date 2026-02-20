@@ -1,0 +1,12 @@
+# Cargo configuration for iroh-libevent
+#
+# Sets macOS deployment target to 11.0 (Big Sur) for compatibility
+
+[env]
+MACOSX_DEPLOYMENT_TARGET = "11.0"
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-mmacosx-version-min=11.0"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-mmacosx-version-min=11.0"]
