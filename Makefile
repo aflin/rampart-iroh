@@ -10,14 +10,8 @@ PKG_CONFIG ?= pkg-config
 # Rampart include path
 RAMPART_INCLUDE ?= /usr/local/rampart/include
 
-# Get libevent flags
-LIBEVENT_CFLAGS := $(shell $(PKG_CONFIG) --cflags libevent 2>/dev/null)
-LIBEVENT_LIBS := $(shell $(PKG_CONFIG) --libs libevent 2>/dev/null)
-
-# Fallback if pkg-config fails
-ifeq ($(LIBEVENT_LIBS),)
-	LIBEVENT_LIBS := -levent
-endif
+# Local libevent fallback path (used on both Linux and macOS if not found elsewhere)
+LIBEVENT_LOCAL := /usr/local/src/rampart/extern/libevent
 
 # Paths
 TARGET_DIR := target/release
@@ -40,6 +34,13 @@ ifeq ($(UNAME_S),Darwin)
 	LDFLAGS += -mmacosx-version-min=11.0
 	# macOS shared library flags
 	MODULE_LDFLAGS := -dynamiclib -undefined dynamic_lookup -install_name rampart-iroh.so
+
+	# On macOS, first try pkg-config with brew prefix, then local fallback
+	BREW_PREFIX := $(shell brew --prefix libevent 2>/dev/null)
+	ifneq ($(BREW_PREFIX),)
+		LIBEVENT_CFLAGS := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" $(PKG_CONFIG) --cflags libevent 2>/dev/null)
+		LIBEVENT_LIBS   := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" $(PKG_CONFIG) --libs libevent 2>/dev/null)
+	endif
 else
 	DYLIB_EXT := so
 	STATIC_LIB := lib$(LIB_NAME).a
@@ -48,6 +49,22 @@ else
 	SYS_LIBS := -lpthread -ldl -lm
 	# Linux shared library flags
 	MODULE_LDFLAGS := -fPIC -shared -Wl,-soname,rampart-iroh.so
+
+	# On Linux, try pkg-config normally
+	LIBEVENT_CFLAGS := $(shell $(PKG_CONFIG) --cflags libevent 2>/dev/null)
+	LIBEVENT_LIBS   := $(shell $(PKG_CONFIG) --libs libevent 2>/dev/null)
+endif
+
+# If libevent was not found via pkg-config (or brew), fall back to the local extern path
+ifeq ($(LIBEVENT_LIBS),)
+	ifneq ($(wildcard $(LIBEVENT_LOCAL)/lib/libevent.a $(LIBEVENT_LOCAL)/lib/libevent.so \
+	                  $(LIBEVENT_LOCAL)/lib/libevent.dylib),)
+		LIBEVENT_CFLAGS := -I$(LIBEVENT_LOCAL)/include
+		LIBEVENT_LIBS   := -L$(LIBEVENT_LOCAL)/lib -levent
+	else
+		# Last-resort: hope the linker finds it on its own
+		LIBEVENT_LIBS := -levent
+	endif
 endif
 
 # Examples
@@ -69,7 +86,7 @@ module: lib $(MODULE)
 
 $(MODULE): $(MODULE_DIR)/rampart-iroh.c $(TARGET_DIR)/$(STATIC_LIB)
 	$(CC) $(CFLAGS) $(LDFLAGS) $(MODULE_LDFLAGS) \
-		-I$(INCLUDE_DIR) -I$(RAMPART_INCLUDE) \
+		-I$(INCLUDE_DIR) -I$(RAMPART_INCLUDE) $(LIBEVENT_CFLAGS) \
 		-o $@ $< \
 		$(TARGET_DIR)/$(STATIC_LIB) \
 		$(SYS_LIBS)
@@ -122,6 +139,7 @@ blobs_persistent: examples/blobs_persistent.c
 clean:
 	$(CARGO) clean
 	rm -f $(EXAMPLES) $(MODULE)
+	rm -rf $(addsuffix .dSYM,$(EXAMPLES)) $(MODULE).dSYM
 
 # Install rampart module
 RAMPART_MODULES := $(shell rampart -c 'console.log(process.modulesPath)' 2>/dev/null || echo /usr/local/rampart/modules)
@@ -129,6 +147,7 @@ RAMPART_MODULES := $(shell rampart -c 'console.log(process.modulesPath)' 2>/dev/
 install: module
 	install -d $(RAMPART_MODULES)
 	install -m 755 $(MODULE) $(RAMPART_MODULES)/
+	strip -S $(RAMPART_MODULES)/$(MODULE)
 
 # Generate header file only
 header:
