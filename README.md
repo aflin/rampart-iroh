@@ -27,23 +27,25 @@ var ep = new iroh.Endpoint([options]);
 
 **Options** (all optional):
 
-| Property    | Type             | Description |
-|-------------|------------------|-------------|
-| `alpn`      | String or Array  | Application protocol identifier(s) for accepting connections. |
-| `secretKey` | String           | Hex-encoded secret key for a persistent identity. If omitted, a random identity is generated. |
-| `discovery` | Boolean          | Enable DNS and n0 discovery services (default: true). |
-| `relay`     | String or false  | Custom relay server URL, or `false` to disable relaying. |
-| `port`      | Number           | UDP port to bind (default: random). |
-| `timeout`   | Number           | Max idle timeout in milliseconds for connections. |
+| Property    | Type                    | Description |
+|-------------|-------------------------|-------------|
+| `alpn`      | String or Array         | Application protocol identifier(s) for accepting connections. |
+| `secretKey` | String or Buffer        | Secret key for a persistent identity. Pass a hex string (64 chars) or a 32-byte binary buffer. If omitted, a random identity is generated each time. |
+| `discovery` | Boolean                 | Enable DNS and n0 discovery services (default: true). |
+| `relay`     | String or false         | Custom relay server URL, or `false` to disable relaying. |
+| `port`      | Number                  | UDP port to bind (default: random). |
+| `timeout`   | Number                  | Max idle timeout in milliseconds for connections. |
 
 ### Properties
 
-| Property  | Type    | Description |
-|-----------|---------|-------------|
-| `nodeId`  | String  | The endpoint's public key (hex). Set after `"online"` fires. |
-| `address` | String  | Full address string: `<nodeId>?relay=<url>`. Set after `"online"` fires. |
-| `online`  | Boolean | True once the endpoint is connected to a relay server. |
-| `closed`  | Boolean | True after `close()` completes. |
+| Property       | Type    | Description |
+|----------------|---------|-------------|
+| `nodeId`       | String  | The endpoint's public key (hex). Set after `"online"` fires. |
+| `address`      | String  | Full address string: `<nodeId>?relay=<url>`. Set after `"online"` fires. |
+| `secretKey`    | Buffer  | The endpoint's 32-byte secret key (binary). Set after `"online"` fires. |
+| `secretKeyHex` | String  | The endpoint's secret key as a 64-character lowercase hex string. Set after `"online"` fires. |
+| `online`       | Boolean | True once the endpoint is connected to a relay server. |
+| `closed`       | Boolean | True after `close()` completes. |
 
 ### Methods
 
@@ -74,7 +76,7 @@ ep.close();
 
 | Event          | Callback Arguments | Description |
 |----------------|--------------------|-------------|
-| `"online"`     | *(none)*           | Endpoint has connected to a relay and is ready. `this.nodeId` and `this.address` are available. |
+| `"online"`     | *(none)*           | Endpoint has connected to a relay and is ready. `this.nodeId`, `this.address`, `this.secretKey`, and `this.secretKeyHex` are available. |
 | `"connection"` | `conn`             | A new incoming connection was accepted. Registering this event starts the accept loop. |
 | `"close"`      | *(none)*           | Endpoint has been closed. |
 | `"error"`      | `errorMessage`     | An error occurred. |
@@ -89,6 +91,39 @@ ep.on("connection", function(conn) {
     console.log("Incoming connection from:", conn.remoteId);
 });
 ```
+
+### Persistent Identity
+
+By default, each Endpoint gets a new random identity. To keep the same
+node ID across restarts, save the secret key and pass it back on the next
+run:
+
+```javascript
+rampart.globalize(rampart.utils);
+var iroh = require("rampart-iroh");
+
+var keyFile = process.scriptPath + "/my-node.key";
+var opts = {};
+
+// Load saved key if it exists
+try {
+    var hex = trim(readFile(keyFile));
+    if (hex.length === 64) opts.secretKey = hex;
+} catch(e) {}
+
+var ep = new iroh.Endpoint(opts);
+
+ep.on("online", function() {
+    // Save key on first run
+    fprintf(keyFile, "%s", this.secretKeyHex);
+    console.log("Node ID:", this.nodeId);  // same every time
+});
+```
+
+Both `secretKey` (binary buffer) and `secretKeyHex` (hex string) are set
+on the endpoint when `"online"` fires. Either form can be passed back via
+the `secretKey` constructor option -- strings are treated as hex, buffers
+as raw 32-byte keys.
 
 ## Connection
 

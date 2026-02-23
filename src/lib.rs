@@ -700,6 +700,17 @@ pub extern "C" fn iroh_endpoint_id(endpoint: *const IrohEndpoint) -> *mut IrohPu
 }
 
 #[no_mangle]
+pub extern "C" fn iroh_endpoint_secret_key(endpoint: *const IrohEndpoint, out_len: *mut usize) -> *mut u8 {
+    if endpoint.is_null() { return ptr::null_mut(); }
+    let bytes = unsafe { &(*endpoint).0 }.secret_key().to_bytes();
+    if !out_len.is_null() { unsafe { *out_len = 32; } }
+    let mut v = bytes.to_vec();
+    let ptr = v.as_mut_ptr();
+    std::mem::forget(v);
+    ptr
+}
+
+#[no_mangle]
 pub extern "C" fn iroh_endpoint_addr(endpoint: *const IrohEndpoint) -> *mut IrohEndpointAddr {
     if endpoint.is_null() { return ptr::null_mut(); }
     let addr = unsafe { &(*endpoint).0 }.addr();

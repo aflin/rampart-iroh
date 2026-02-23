@@ -28,6 +28,17 @@ function testFeature(name, test) {
     if (error) console.log(error);
 }
 
+/* Helper: convert plain Duktape buffer to string */
+function bufToStr(buf) {
+    if (typeof buf === 'string') return buf;
+    if (buf === null || buf === undefined) return null;
+    var u8 = new Uint8Array(buf);
+    var s = '';
+    for (var i = 0; i < u8.length; i++)
+        s += String.fromCharCode(u8[i]);
+    return s;
+}
+
 /* ================================================================
    Test 1: Module load and constructors
    ================================================================ */
@@ -59,6 +70,8 @@ function runCloseTest(callback) {
         testFeature("endpoint comes online", true);
         testFeature("nodeId is a string", typeof this.nodeId === 'string' && this.nodeId.length > 0);
         testFeature("address is a string", typeof this.address === 'string' && this.address.length > 0);
+        testFeature("secretKey is a buffer", typeof this.secretKey === 'object' && this.secretKey.byteLength === 32);
+        testFeature("secretKeyHex is a hex string", typeof this.secretKeyHex === 'string' && this.secretKeyHex.length === 64);
 
         ep.close();
 
@@ -77,7 +90,61 @@ function runCloseTest(callback) {
 }
 
 /* ================================================================
-   Test 3: Echo server / client with streams
+   Test 3: Secret key persistence (hex and buffer round-trip)
+   ================================================================ */
+
+function runSecretKeyTest(callback) {
+    var skDone = false;
+    var ep1 = new iroh.Endpoint();
+
+    ep1.on("error", function(err) {
+        testFeature("secretkey - no errors", false);
+    });
+
+    ep1.on("online", function() {
+        var savedHex = this.secretKeyHex;
+        var savedBuf = this.secretKey;
+        var savedNodeId = this.nodeId;
+        ep1.close();
+
+        setTimeout(function() {
+            /* Restore from hex string */
+            var ep2 = new iroh.Endpoint({ secretKey: savedHex });
+            ep2.on("error", function(err) {
+                testFeature("secretkey - hex restore no errors", false);
+            });
+            ep2.on("online", function() {
+                testFeature("secretkey - hex restores same nodeId",
+                    this.nodeId === savedNodeId);
+                ep2.close();
+
+                setTimeout(function() {
+                    /* Restore from binary buffer */
+                    var ep3 = new iroh.Endpoint({ secretKey: savedBuf });
+                    ep3.on("error", function(err) {
+                        testFeature("secretkey - buf restore no errors", false);
+                    });
+                    ep3.on("online", function() {
+                        testFeature("secretkey - buffer restores same nodeId",
+                            this.nodeId === savedNodeId);
+                        ep3.close();
+                        skDone = true;
+                        setTimeout(callback, 1000);
+                    });
+                }, 1000);
+            });
+        }, 1000);
+    });
+
+    setTimeout(function() {
+        if (!skDone) {
+            testFeature("secretkey test (timeout)", false);
+        }
+    }, 20000);
+}
+
+/* ================================================================
+   Test 4: Echo server / client with streams
    ================================================================ */
 
 var ALPN = "iroh-test-echo/1";
@@ -380,16 +447,16 @@ function runDocsTest(callback) {
                             testFeature("docs - set key-value pairs", true);
 
                             docs1.get(nsId, authorId, DOC_KEY, function(data) {
-                                getOk = (bufferToString(data) === DOC_VAL);
+                                getOk = (bufToStr(data) === DOC_VAL);
                                 testFeature("docs - get returns correct value", getOk);
 
                                 docs1.getLatest(nsId, DOC_KEY, function(data2) {
-                                    getLatestOk = (bufferToString(data2) === DOC_VAL);
+                                    getLatestOk = (bufToStr(data2) === DOC_VAL);
                                     testFeature("docs - getLatest returns correct value", getLatestOk);
 
                                     docs1.delete(nsId, authorId, DOC_KEY2, function() {
                                         docs1.getLatest(nsId, DOC_KEY2, function(data3) {
-                                            deleteOk = (data3 === null);
+                                            deleteOk = (bufToStr(data3) === null);
                                             testFeature("docs - delete removes key", deleteOk);
 
                                             /* Two-node sync */
@@ -434,7 +501,7 @@ function startDocsNode2(ticket, docs1, callback) {
                 testFeature("docs - node2 joins via ticket", typeof nsId === 'string' && nsId.length > 0);
 
                 docs2.getLatest(nsId, DOC_KEY, function(data) {
-                    var val = bufferToString(data);
+                    var val = bufToStr(data);
                     testFeature("docs - node2 reads synced value", val === DOC_VAL);
                     callback();
                 });
@@ -453,6 +520,7 @@ function allDone() {
 }
 
 runCloseTest(function() {
+    runSecretKeyTest(function() {
     runEchoTest(function() {
         runGossipTest(function() {
             runBlobsTest(function() {
@@ -461,6 +529,7 @@ runCloseTest(function() {
                 });
             });
         });
+    });
     });
 });
 

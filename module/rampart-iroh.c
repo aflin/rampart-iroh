@@ -17,6 +17,9 @@
 #include "event2/event.h"
 #include "iroh_libevent.h"
 
+/* from rampart-utils.c, not declared in rampart.h */
+extern void duk_rp_hexToBuf(duk_context *ctx, duk_idx_t idx);
+
 /* ======================================================================
  * Type Definitions
  * ====================================================================== */
@@ -866,6 +869,24 @@ static void iroh_on_endpoint_online(RPIROH_ASYNC *aop, IrohAsyncState state)
                 iroh_string_free(id_str);
             }
             iroh_public_key_free(id);
+        }
+    }
+    {
+        size_t sk_len = 0;
+        uint8_t *sk_bytes = iroh_endpoint_secret_key(ictx->endpoint, &sk_len);
+        if (sk_bytes && sk_len == 32) {
+            /* secretKey: plain buffer (binary) */
+            void *buf = duk_push_fixed_buffer(ctx, 32);
+            memcpy(buf, sk_bytes, 32);
+            duk_put_prop_string(ctx, -2, "secretKey");
+
+            /* secretKeyHex: lowercase hex string */
+            buf = duk_push_fixed_buffer(ctx, 32);
+            memcpy(buf, sk_bytes, 32);
+            duk_rp_toHex(ctx, -1, 0);
+            duk_put_prop_string(ctx, -2, "secretKeyHex");
+
+            iroh_bytes_free(sk_bytes, sk_len);
         }
     }
     {
@@ -1889,14 +1910,23 @@ static duk_ret_t duk_rp_iroh_endpoint(duk_context *ctx)
         }
         duk_pop(ctx);
 
-        /* secretKey */
+        /* secretKey: string (hex) or buffer (binary 32 bytes) */
         if (duk_get_prop_string(ctx, 0, "secretKey")) {
             if (duk_is_string(ctx, -1)) {
-                IrohSecretKey *sk = iroh_secret_key_from_string(duk_get_string(ctx, -1));
-                if (sk) {
-                    iroh_endpoint_config_secret_key(config, sk);
-                    iroh_secret_key_free(sk);
+                /* hex string -> decode to binary buffer */
+                duk_rp_hexToBuf(ctx, -1);  /* pushes buffer on top */
+                {
+                    duk_size_t blen;
+                    const uint8_t *bptr = (const uint8_t *)duk_get_buffer_data(ctx, -1, &blen);
+                    if (bptr && blen == 32)
+                        iroh_endpoint_config_secret_key_bytes(config, bptr, blen);
                 }
+                duk_pop(ctx); /* pop the buffer */
+            } else if (duk_is_buffer_data(ctx, -1)) {
+                duk_size_t blen;
+                const uint8_t *bptr = (const uint8_t *)duk_get_buffer_data(ctx, -1, &blen);
+                if (bptr && blen == 32)
+                    iroh_endpoint_config_secret_key_bytes(config, bptr, blen);
             }
         }
         duk_pop(ctx);

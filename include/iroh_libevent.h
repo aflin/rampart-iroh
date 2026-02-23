@@ -303,6 +303,9 @@ extern "C"
     /** Get the endpoint's public key (endpoint ID). */
     IrohPublicKey *iroh_endpoint_id(const IrohEndpoint *endpoint);
 
+    /** Get the endpoint's secret key as 32 raw bytes. Free with iroh_bytes_free(). */
+    uint8_t *iroh_endpoint_secret_key(const IrohEndpoint *endpoint, size_t *out_len);
+
     /** Get the endpoint's address. */
     IrohEndpointAddr *iroh_endpoint_addr(const IrohEndpoint *endpoint);
 
