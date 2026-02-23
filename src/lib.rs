@@ -104,8 +104,11 @@ impl IrohAsyncHandle {
                 libc::fcntl(fds[0], libc::F_SETFL, flags | libc::O_NONBLOCK);
             }
         }
-        #[cfg(not(unix))]
-        { return Err(IrohError::Internal); }
+        // On Windows, pipe fds are not used. MinGW CRT fds are incompatible with
+        // MSYS libevent. Instead, the C module polls iroh_async_poll() on a timer.
+        // read_fd/write_fd remain -1 to signal this to the C layer.
+        #[cfg(windows)]
+        { fds = [-1, -1]; }
         Ok(Arc::new(Self {
             state: Mutex::new(IrohAsyncState::Pending),
             result: Mutex::new(None), error: Mutex::new(None),
@@ -125,6 +128,7 @@ impl IrohAsyncHandle {
     fn notify(&self) {
         #[cfg(unix)]
         unsafe { let buf: [u8; 1] = [1]; libc::write(self.write_fd, buf.as_ptr() as *const c_void, 1); }
+        // On Windows, no pipe notification needed — C module polls via timer.
     }
     fn take_result<T: 'static>(&self) -> Option<T> {
         self.result.lock().take().and_then(|b| b.downcast::<T>().ok()).map(|b| *b)
@@ -135,6 +139,7 @@ impl Drop for IrohAsyncHandle {
     fn drop(&mut self) {
         #[cfg(unix)]
         unsafe { libc::close(self.read_fd); libc::close(self.write_fd); }
+        // On Windows, no pipe fds to close.
     }
 }
 

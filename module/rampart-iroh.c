@@ -496,6 +496,11 @@ static void iroh_free_async_op(RPIROH_ASYNC *aop)
     free(aop);
 }
 
+/* On Windows, poll interval for async operations (no pipe fd available) */
+#ifdef __CYGWIN__
+static const struct timeval iroh_poll_tv = {0, 1000}; /* 1ms */
+#endif
+
 static void iroh_async_cb(evutil_socket_t fd, short events, void *arg)
 {
     RPIROH_ASYNC *aop = (RPIROH_ASYNC *)arg;
@@ -504,7 +509,11 @@ static void iroh_async_cb(evutil_socket_t fd, short events, void *arg)
 
     state = iroh_async_poll(aop->handle);
     if (state == IROH_ASYNC_PENDING) {
+#ifdef __CYGWIN__
+        event_add(aop->ev, &iroh_poll_tv);
+#else
         event_add(aop->ev, NULL);
+#endif
         return;
     }
 
@@ -521,17 +530,26 @@ static RPIROH_ASYNC *iroh_start_async(RPIROH *ictx, IrohAsyncHandle *handle,
     if (!handle) return NULL;
 
     fd = iroh_async_get_fd(handle);
+#ifndef __CYGWIN__
     if (fd < 0) {
         iroh_async_free(handle);
         return NULL;
     }
+#endif
 
     CALLOC(aop, sizeof(RPIROH_ASYNC));
     aop->ictx = ictx;
     aop->handle = handle;
     aop->op_type = op;
     aop->aux = aux;
+
+#ifdef __CYGWIN__
+    /* MinGW pipe fds are incompatible with MSYS/Cygwin libevent.
+       Use a timer event to poll iroh_async_poll() instead. */
+    aop->ev = evtimer_new(ictx->base, iroh_async_cb, aop);
+#else
     aop->ev = event_new(ictx->base, fd, EV_READ, iroh_async_cb, aop);
+#endif
 
     if (!aop->ev) {
         iroh_async_free(handle);
@@ -539,7 +557,11 @@ static RPIROH_ASYNC *iroh_start_async(RPIROH *ictx, IrohAsyncHandle *handle,
         return NULL;
     }
 
+#ifdef __CYGWIN__
+    event_add(aop->ev, &iroh_poll_tv);
+#else
     event_add(aop->ev, NULL);
+#endif
 
     if (ictx->npending >= ictx->pending_alloc) {
         ictx->pending_alloc = ictx->pending_alloc ? ictx->pending_alloc * 2 : 8;

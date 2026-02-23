@@ -4,9 +4,18 @@
 
 [env]
 MACOSX_DEPLOYMENT_TARGET = "11.0"
+# Use MinGW gcc for C code compiled by Rust build scripts (e.g. aws-lc-sys).
+# Only takes effect when this target is active (Windows). Ignored on macOS/Linux
+# since their native cc is used and this path won't exist.
+CC_x86_64_pc_windows_gnu = "C:/tools/msys64/mingw64/bin/gcc.exe"
 
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-arg=-mmacosx-version-min=11.0"]
 
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "link-arg=-mmacosx-version-min=11.0"]
+
+# On Windows (MSYS2), use MinGW gcc for Rust build and its C dependencies (e.g. aws-lc-sys).
+# The MSYS gcc at /usr/bin/gcc has path translation issues with build scripts.
+[target.x86_64-pc-windows-gnu]
+linker = "C:/tools/msys64/mingw64/bin/gcc.exe"

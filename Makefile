@@ -7,8 +7,8 @@ CC ?= gcc
 CFLAGS ?= -Wall -Wextra -g -O2
 PKG_CONFIG ?= pkg-config
 
-# Rampart include path
-RAMPART_INCLUDE ?= /usr/local/rampart/include
+# Rampart include path (auto-detect via rampart, fallback to default)
+RAMPART_INCLUDE ?= $(or $(shell rampart -c 'console.log(process.installPath)' 2>/dev/null | tr -d '\r'),/usr/local/rampart)/include
 
 # Local libevent fallback path (used on both Linux and macOS if not found elsewhere)
 LIBEVENT_LOCAL := /usr/local/src/rampart/extern/libevent
@@ -41,6 +41,23 @@ ifeq ($(UNAME_S),Darwin)
 		LIBEVENT_CFLAGS := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" $(PKG_CONFIG) --cflags libevent 2>/dev/null)
 		LIBEVENT_LIBS   := $(shell PKG_CONFIG_PATH="$(BREW_PREFIX)/lib/pkgconfig" $(PKG_CONFIG) --libs libevent 2>/dev/null)
 	endif
+else ifneq ($(filter MSYS_NT% MINGW64_NT% MINGW32_NT%,$(UNAME_S)),)
+	# Use MSYS gcc (not MinGW gcc) for the module to match rampart's ABI.
+	# MinGW gcc may be first on PATH (needed for cargo), but the module must
+	# link against msys-2.0.dll like rampart does.
+	CC := /c/tools/msys64/usr/bin/gcc.exe
+	DYLIB_EXT := so
+	STATIC_LIB := lib$(LIB_NAME).a
+	DYNAMIC_LIB := lib$(LIB_NAME).$(DYLIB_EXT)
+	# Windows/MSYS2: link against an MSYS-compatible import library for the MinGW-built DLL.
+	# The MinGW .dll.a has PE relocator refs that MSYS ld can't resolve, so we regenerate
+	# the import lib using MSYS dlltool with only the public C API symbols.
+	MODULE_LINK_LIB := lib$(LIB_NAME)_msys.dll.a
+	# Windows/MSYS2: link against rampart import library
+	RAMPART_BIN := $(or $(shell rampart -c 'console.log(process.installPath)' 2>/dev/null | tr -d '\r'),/usr/local/rampart)/bin
+	SYS_LIBS := '-L$(RAMPART_BIN)' -lrampart
+	# MSYS2 shared library flags (disable pseudo-reloc: no data imports from the DLL)
+	MODULE_LDFLAGS := -fPIC -shared -Wl,--disable-runtime-pseudo-reloc
 else
 	DYLIB_EXT := so
 	STATIC_LIB := lib$(LIB_NAME).a
@@ -54,6 +71,9 @@ else
 	LIBEVENT_CFLAGS := $(shell $(PKG_CONFIG) --cflags libevent 2>/dev/null)
 	LIBEVENT_LIBS   := $(shell $(PKG_CONFIG) --libs libevent 2>/dev/null)
 endif
+
+# Default: link module against the static library (overridden to DLL import lib on Windows)
+MODULE_LINK_LIB ?= $(STATIC_LIB)
 
 # If libevent was not found via pkg-config (or brew), fall back to the local extern path
 ifeq ($(LIBEVENT_LIBS),)
@@ -84,11 +104,18 @@ lib:
 
 module: lib $(MODULE)
 
-$(MODULE): $(MODULE_DIR)/rampart-iroh.c $(TARGET_DIR)/$(STATIC_LIB)
+# On Windows/MSYS2, generate an MSYS-compatible import library from the MinGW-built DLL
+$(TARGET_DIR)/lib$(LIB_NAME)_msys.dll.a: $(TARGET_DIR)/$(LIB_NAME).dll
+	@echo "Generating MSYS-compatible import library..."
+	nm $< | grep " T iroh_" | awk '{print "    " $$3}' > $(TARGET_DIR)/$(LIB_NAME)_msys.def
+	sed -i '1i LIBRARY $(LIB_NAME).dll\nEXPORTS' $(TARGET_DIR)/$(LIB_NAME)_msys.def
+	dlltool -d $(TARGET_DIR)/$(LIB_NAME)_msys.def -l $@ -D $(LIB_NAME).dll
+
+$(MODULE): $(MODULE_DIR)/rampart-iroh.c $(TARGET_DIR)/$(MODULE_LINK_LIB)
 	$(CC) $(CFLAGS) $(LDFLAGS) $(MODULE_LDFLAGS) \
-		-I$(INCLUDE_DIR) -I$(RAMPART_INCLUDE) $(LIBEVENT_CFLAGS) \
+		-I$(INCLUDE_DIR) '-I$(RAMPART_INCLUDE)' $(LIBEVENT_CFLAGS) \
 		-o $@ $< \
-		$(TARGET_DIR)/$(STATIC_LIB) \
+		$(TARGET_DIR)/$(MODULE_LINK_LIB) \
 		$(SYS_LIBS)
 
 examples: lib $(EXAMPLES)
@@ -145,9 +172,13 @@ clean:
 RAMPART_MODULES := $(shell rampart -c 'console.log(process.modulesPath)' 2>/dev/null || echo /usr/local/rampart/modules)
 
 install: module
-	install -d $(RAMPART_MODULES)
-	install -m 755 $(MODULE) $(RAMPART_MODULES)/
-	strip -S $(RAMPART_MODULES)/$(MODULE)
+	install -d '$(RAMPART_MODULES)'
+	install -m 755 $(MODULE) '$(RAMPART_MODULES)/'
+ifneq ($(filter MSYS_NT% MINGW64_NT% MINGW32_NT%,$(UNAME_S)),)
+	install -m 755 $(TARGET_DIR)/$(LIB_NAME).dll '$(RAMPART_MODULES)/'
+else
+	strip -S '$(RAMPART_MODULES)/$(MODULE)'
+endif
 
 # Generate header file only
 header:
