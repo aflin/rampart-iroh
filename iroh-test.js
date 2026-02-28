@@ -28,17 +28,6 @@ function testFeature(name, test) {
     if (error) console.log(error);
 }
 
-/* Helper: convert plain Duktape buffer to string */
-function bufToStr(buf) {
-    if (typeof buf === 'string') return buf;
-    if (buf === null || buf === undefined) return null;
-    var u8 = new Uint8Array(buf);
-    var s = '';
-    for (var i = 0; i < u8.length; i++)
-        s += String.fromCharCode(u8[i]);
-    return s;
-}
-
 /* ================================================================
    Test 1: Module load and constructors
    ================================================================ */
@@ -268,7 +257,7 @@ function runGossipTest(callback) {
             });
 
             topic1.on("message", function(msg) {
-                if (msg.data === GOSSIP_MSG_2) {
+                if (bufferToString(msg.data) === GOSSIP_MSG_2) {
                     node1ReceivedMsg = true;
                     checkGossipDone();
                 }
@@ -307,7 +296,7 @@ function runGossipTest(callback) {
                         });
 
                         topic2.on("message", function(msg) {
-                            if (msg.data === GOSSIP_MSG_1) {
+                            if (bufferToString(msg.data) === GOSSIP_MSG_1) {
                                 node2ReceivedMsg = true;
                                 topic2.broadcast(GOSSIP_MSG_2);
                                 checkGossipDone();
@@ -453,16 +442,16 @@ function runDocsTest(callback) {
                             testFeature("docs - set key-value pairs", true);
 
                             docs1.get(nsId, authorId, DOC_KEY, function(data) {
-                                getOk = (bufToStr(data) === DOC_VAL);
+                                getOk = (bufferToString(data) === DOC_VAL);
                                 testFeature("docs - get returns correct value", getOk);
 
                                 docs1.getAttr(nsId, DOC_KEY, function(data2) {
-                                    getAttrOk = (bufToStr(data2) === DOC_VAL);
+                                    getAttrOk = (bufferToString(data2) === DOC_VAL);
                                     testFeature("docs - getAttr returns correct value", getAttrOk);
 
                                     docs1.delete(nsId, authorId, DOC_KEY2, function() {
                                         docs1.getAttr(nsId, DOC_KEY2, function(data3) {
-                                            deleteOk = (bufToStr(data3) === null);
+                                            deleteOk = (data3 === null);
                                             testFeature("docs - delete removes key", deleteOk);
 
                                             /* Two-node sync */
@@ -507,7 +496,7 @@ function startDocsNode2(ticket, docs1, callback) {
                 testFeature("docs - node2 joins via ticket", typeof nsId === 'string' && nsId.length > 0);
 
                 docs2.getAttr(nsId, DOC_KEY, function(data) {
-                    var val = bufToStr(data);
+                    var val = bufferToString(data);
                     testFeature("docs - node2 reads synced value", val === DOC_VAL);
                     callback();
                 });
@@ -551,34 +540,34 @@ function runDocsMultiSetTest(callback) {
                         /* Verify all three keys were set */
                         docs.getAttr(nsId, "name", function(data) {
                             testFeature("docs multi-set - name correct",
-                                bufToStr(data) === "Alice");
+                                bufferToString(data) === "Alice");
 
                             docs.getAttr(nsId, "status", function(data) {
                                 testFeature("docs multi-set - status correct",
-                                    bufToStr(data) === "online");
+                                    bufferToString(data) === "online");
 
                                 docs.getAttr(nsId, "color", function(data) {
                                     testFeature("docs multi-set - color correct",
-                                        bufToStr(data) === "blue");
+                                        bufferToString(data) === "blue");
 
                                     /* Also verify single-key set still works alongside */
                                     docs.set(nsId, authorId, "extra", "value", function() {
                                         docs.getAttr(nsId, "extra", function(data) {
                                             testFeature("docs - single set still works after multi-set",
-                                                bufToStr(data) === "value");
+                                                bufferToString(data) === "value");
 
                                             /* Test getAll — should return all 4 keys as an object */
                                             docs.getAll(nsId, function(obj) {
                                                 testFeature("docs - getAll returns object",
                                                     typeof obj === 'object' && obj !== null);
                                                 testFeature("docs - getAll has name",
-                                                    bufToStr(obj.name) === "Alice");
+                                                    bufferToString(obj.name) === "Alice");
                                                 testFeature("docs - getAll has status",
-                                                    bufToStr(obj.status) === "online");
+                                                    bufferToString(obj.status) === "online");
                                                 testFeature("docs - getAll has color",
-                                                    bufToStr(obj.color) === "blue");
+                                                    bufferToString(obj.color) === "blue");
                                                 testFeature("docs - getAll has extra",
-                                                    bufToStr(obj.extra) === "value");
+                                                    bufferToString(obj.extra) === "value");
                                                 allReadOk = true;
                                                 callback();
                                             });

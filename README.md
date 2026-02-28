@@ -212,7 +212,7 @@ Immediately tear down the stream without a graceful shutdown.
 
 | Event     | Callback Arguments | Description |
 |-----------|--------------------|-------------|
-| `"data"`  | `data`             | Data received (String). Registering this event starts the read loop. |
+| `"data"`  | `data`             | Data received (Buffer). Registering this event starts the read loop. |
 | `"end"`   | *(none)*           | The remote side has finished writing. |
 | `"close"` | *(none)*           | Stream is fully closed. |
 | `"error"` | `errorMessage`     | A stream error occurred. |
@@ -374,7 +374,7 @@ Unsubscribe from the topic.
 | Event          | Callback Arguments | Description |
 |----------------|--------------------|-------------|
 | `"ready"`      | *(none)*           | Subscription is active. |
-| `"message"`    | `msg`              | A message was received. `msg.data` is the message content (String), `msg.sender` is the sender's node ID. |
+| `"message"`    | `msg`              | A message was received. `msg.data` is the message content (Buffer), `msg.sender` is the sender's node ID. |
 | `"peerJoin"`   | `peerId`           | A peer joined the topic. |
 | `"peerLeave"`  | `peerId`           | A peer left the topic. |
 | `"error"`      | `errorMessage`     | An error occurred. |
@@ -392,7 +392,7 @@ ep1.on("online", function() {
         var topic = gossip1.subscribe("chat-room");
 
         topic.on("message", function(msg) {
-            console.log(msg.sender + ":", msg.data);
+            rampart.utils.printf("%s: '%s'\n", msg.sender, msg.data);
         });
 
         topic.on("peerJoin", function(peerId) {
@@ -409,7 +409,7 @@ ep2.on("online", function() {
         var topic = gossip2.subscribe("chat-room", [node1Id]);
 
         topic.on("message", function(msg) {
-            console.log(msg.sender + ":", msg.data);
+            rampart.utils.printf("%s: '%s'\n", msg.sender, msg.data);
         });
 
         topic.on("ready", function() {
@@ -657,9 +657,7 @@ Get a value by namespace, author, and key.
 
 ```javascript
 docs.get(nsId, authorId, "greeting", function(buf) {
-    // buf is a plain buffer; convert to string if needed
-    var str = bufToStr(buf);
-    console.log("Value:", str);
+    rampart.utils.printf("Value: '%s'\n", buf);
 });
 ```
 
@@ -674,8 +672,7 @@ Get the latest value for a key across all authors.
 
 ```javascript
 docs.getAttr(nsId, "greeting", function(buf) {
-    var str = bufToStr(buf);
-    console.log("Latest value:", str);
+    rampart.utils.printf("Latest value: '%s'\n", buf);
 });
 ```
 
@@ -692,7 +689,7 @@ key across all authors.
 docs.getAll(nsId, function(obj) {
     // obj is e.g. { name: <Buffer>, status: <Buffer>, color: <Buffer> }
     for (var key in obj) {
-        console.log(key + ":", bufToStr(obj[key]));
+        rampart.utils.printf("%s: '%s'\n", key, obj[key]);
     }
 });
 ```
@@ -738,7 +735,7 @@ contents are synced automatically.
 docs.join(ticket, function(nsId) {
     console.log("Joined document:", nsId);
     docs.getAttr(nsId, "greeting", function(buf) {
-        console.log("Synced value:", bufToStr(buf));
+        rampart.utils.printf("Synced value: '%s'\n", buf);
     });
 });
 ```
@@ -747,23 +744,11 @@ docs.join(ticket, function(nsId) {
 
 Shut down the document store.
 
-### Buffer to String Helper
+### Buffer Values
 
-The `get()`, `getAttr()`, and `getAll()` methods return plain buffers
-as values. To convert to a string:
-
-```javascript
-function bufToStr(buf) {
-    if (typeof buf === 'string') return buf;
-    if (buf === null || buf === undefined) return null;
-    var u8 = new Uint8Array(buf);
-    var s = '';
-    for (var i = 0; i < u8.length; i++) {
-        s += String.fromCharCode(u8[i]);
-    }
-    return s;
-}
-```
+The `get()`, `getAttr()`, and `getAll()` methods return values as plain
+buffers. Use `rampart.utils.printf()` with `%s` to print them directly,
+or `rampart.utils.bufferToString()` to convert to a string.
 
 ### Distributed Key-Value Store Example
 
@@ -799,8 +784,8 @@ ep2.on("online", function() {
     docs2.on("ready", function() {
         docs2.join(ticket, function(nsId) {
             docs2.getAll(nsId, function(obj) {
-                console.log("Name:", bufToStr(obj.name));      // "Alice"
-                console.log("Status:", bufToStr(obj.status));  // "online"
+                rampart.utils.printf("Name: '%s'\n", obj.name);      // "Alice"
+                rampart.utils.printf("Status: '%s'\n", obj.status);  // "online"
             });
         });
     });

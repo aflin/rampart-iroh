@@ -1183,7 +1183,6 @@ static void iroh_on_stream_data(RPIROH_ASYNC *aop, IrohAsyncState state)
         duk_push_heapptr(ctx, ictx->thisptr);
         buf = duk_push_buffer(ctx, result.len, 0);
         memcpy(buf, result.data, result.len);
-        duk_buffer_to_string(ctx, -1);
         iroh_do_callback(ctx, "data", 1);
     }
     if (result.data)
@@ -1369,7 +1368,6 @@ static void iroh_on_gossip_recv(RPIROH_ASYNC *aop, IrohAsyncState state)
                 if (event.data && event.data_len > 0) {
                     void *buf = duk_push_buffer(ctx, event.data_len, 0);
                     memcpy(buf, event.data, event.data_len);
-                    duk_buffer_to_string(ctx, -1);
                     duk_put_prop_string(ctx, -2, "data");
                 }
                 if (event.peer) {
