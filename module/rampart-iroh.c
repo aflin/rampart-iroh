@@ -1319,8 +1319,8 @@ static void iroh_on_gossip_subscribed(RPIROH_ASYNC *aop, IrohAsyncState state)
         return;
     }
 
-    iroh_fire_event(ictx, "ready");
     iroh_start_gossip_recv_loop(ictx);
+    iroh_fire_event(ictx, "ready");
 }
 
 static void iroh_on_gossip_broadcast(RPIROH_ASYNC *aop, IrohAsyncState state)

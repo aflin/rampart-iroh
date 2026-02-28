@@ -278,6 +278,12 @@ function runGossipTest(callback) {
                 topic1.broadcast(GOSSIP_MSG_1);
             });
 
+            // wait a sec, because two connections on the same machine can create
+            // a bit of a race, since ready doesn't mean full discovery has happened yet.
+            // and peerJoin may not fire.
+            // seems to only be an issue on raspberry pi.
+            sleep(2);
+
             topic1.on("ready", function() {
                 /* Start node 2 */
                 var ep2 = new iroh.Endpoint();
