@@ -195,6 +195,10 @@ endif
 		install -m 644 iroh-test.js '$(RAMPART_TEST)/'; \
 		echo "Installed iroh-test.js to $(RAMPART_TEST)/"; \
 	fi
+	@if [ -d '$(RAMPART_INSTALL)/licenses' ]; then \
+		cp licenses/* '$(RAMPART_INSTALL)/licenses/'; \
+		echo "Installed license files to $(RAMPART_INSTALL)/licenses/"; \
+	fi
 
 # Generate header file only
 header:
