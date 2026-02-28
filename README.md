@@ -29,7 +29,7 @@ var ep = new iroh.Endpoint([options]);
 
 | Property    | Type                    | Description |
 |-------------|-------------------------|-------------|
-| `alpn`      | String or Array         | Application protocol identifier(s) for accepting connections. |
+| `alpn`      | String or Array         | Application protocol identifier(s) for accepting incoming connections. Required for servers; client-only endpoints can omit this since the ALPN is specified per-call in `ep.connect()`. |
 | `secretKey` | String or Buffer        | Secret key for a persistent identity. Pass a hex string (64 chars) or a 32-byte binary buffer. If omitted, a random identity is generated each time. |
 | `discovery` | Boolean                 | Enable DNS and n0 discovery services (default: true). |
 | `relay`     | String or false         | Custom relay server URL, or `false` to disable relaying. |
