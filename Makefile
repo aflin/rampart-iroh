@@ -179,7 +179,9 @@ clean:
 	rm -rf $(addsuffix .dSYM,$(EXAMPLES)) $(MODULE).dSYM
 
 # Install rampart module
-RAMPART_MODULES := $(shell rampart -c 'console.log(process.modulesPath)' 2>/dev/null || echo /usr/local/rampart/modules)
+RAMPART_INSTALL := $(shell rampart -c 'console.log(process.installPath)' 2>/dev/null || echo /usr/local/rampart)
+RAMPART_MODULES := $(RAMPART_INSTALL)/modules
+RAMPART_TEST := $(RAMPART_INSTALL)/test
 
 install: module
 	install -d '$(RAMPART_MODULES)'
@@ -189,6 +191,10 @@ ifneq ($(filter MSYS_NT% MINGW64_NT% MINGW32_NT%,$(UNAME_S)),)
 else
 	strip -S '$(RAMPART_MODULES)/$(MODULE)'
 endif
+	@if [ -d '$(RAMPART_TEST)' ]; then \
+		install -m 644 iroh-test.js '$(RAMPART_TEST)/'; \
+		echo "Installed iroh-test.js to $(RAMPART_TEST)/"; \
+	fi
 
 # Generate header file only
 header:
