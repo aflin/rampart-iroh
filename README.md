@@ -624,6 +624,27 @@ docs.set(nsId, authorId, "greeting", "Hello!", function() {
 });
 ```
 
+#### docs.set(nsId, authorId, obj [, callback])
+
+Set multiple key-value pairs in a single call. The third argument may be a
+plain object whose own properties are the keys and values to set. All values
+must be strings or buffers.
+
+- **nsId** (String) -- The namespace ID.
+- **authorId** (String) -- The author ID.
+- **obj** (Object) -- An object of key-value pairs.
+- **callback** (Function, optional) -- Called with no arguments on success.
+
+```javascript
+docs.set(nsId, authorId, {
+    "name":   "Alice",
+    "status": "online",
+    "color":  "blue"
+}, function() {
+    console.log("All values set.");
+});
+```
+
 #### docs.get(nsId, authorId, key, callback)
 
 Get a value by namespace, author, and key.
@@ -642,7 +663,7 @@ docs.get(nsId, authorId, "greeting", function(buf) {
 });
 ```
 
-#### docs.getLatest(nsId, key, callback)
+#### docs.getAttr(nsId, key, callback)
 
 Get the latest value for a key across all authors.
 
@@ -652,9 +673,27 @@ Get the latest value for a key across all authors.
   if not found.
 
 ```javascript
-docs.getLatest(nsId, "greeting", function(buf) {
+docs.getAttr(nsId, "greeting", function(buf) {
     var str = bufToStr(buf);
     console.log("Latest value:", str);
+});
+```
+
+#### docs.getAll(nsId, callback)
+
+Get all key-value pairs from a document. Returns the latest value for each
+key across all authors.
+
+- **nsId** (String) -- The namespace ID.
+- **callback** (Function) -- Called with a plain object whose properties are
+  the document's keys and whose values are buffers.
+
+```javascript
+docs.getAll(nsId, function(obj) {
+    // obj is e.g. { name: <Buffer>, status: <Buffer>, color: <Buffer> }
+    for (var key in obj) {
+        console.log(key + ":", bufToStr(obj[key]));
+    }
 });
 ```
 
@@ -698,7 +737,7 @@ contents are synced automatically.
 ```javascript
 docs.join(ticket, function(nsId) {
     console.log("Joined document:", nsId);
-    docs.getLatest(nsId, "greeting", function(buf) {
+    docs.getAttr(nsId, "greeting", function(buf) {
         console.log("Synced value:", bufToStr(buf));
     });
 });
@@ -710,8 +749,8 @@ Shut down the document store.
 
 ### Buffer to String Helper
 
-The `get()` and `getLatest()` methods return plain buffers. To convert
-to a string:
+The `get()`, `getAttr()`, and `getAll()` methods return plain buffers
+as values. To convert to a string:
 
 ```javascript
 function bufToStr(buf) {
@@ -738,12 +777,14 @@ ep1.on("online", function() {
     docs1.on("ready", function() {
         docs1.createAuthor(function(authorId) {
             docs1.createDoc(function(nsId) {
-                docs1.set(nsId, authorId, "name", "Alice", function() {
-                    docs1.set(nsId, authorId, "status", "online", function() {
-                        // Create ticket for sharing
-                        docs1.createTicket(nsId, function(ticket) {
-                            console.log("Share ticket:", ticket);
-                        });
+                // Set multiple values at once using an object
+                docs1.set(nsId, authorId, {
+                    "name":   "Alice",
+                    "status": "online"
+                }, function() {
+                    // Create ticket for sharing
+                    docs1.createTicket(nsId, function(ticket) {
+                        console.log("Share ticket:", ticket);
                     });
                 });
             });
@@ -751,14 +792,15 @@ ep1.on("online", function() {
     });
 });
 
-// Node 2: join and read synced data
+// Node 2: join and read all synced data
 var ep2 = new iroh.Endpoint();
 ep2.on("online", function() {
     var docs2 = new iroh.Docs(ep2);
     docs2.on("ready", function() {
         docs2.join(ticket, function(nsId) {
-            docs2.getLatest(nsId, "name", function(buf) {
-                console.log("Name:", bufToStr(buf));  // "Alice"
+            docs2.getAll(nsId, function(obj) {
+                console.log("Name:", bufToStr(obj.name));      // "Alice"
+                console.log("Status:", bufToStr(obj.status));  // "online"
             });
         });
     });

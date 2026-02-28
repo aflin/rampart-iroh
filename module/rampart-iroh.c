@@ -60,6 +60,7 @@ typedef enum {
     IROH_OP_DOCS_SET,
     IROH_OP_DOCS_GET,
     IROH_OP_DOCS_GET_LATEST,
+    IROH_OP_DOCS_GET_ALL,
     IROH_OP_DOCS_DELETE,
     IROH_OP_DOCS_CREATE_TICKET,
     IROH_OP_DOCS_JOIN,
@@ -1733,7 +1734,7 @@ static void iroh_on_docs_get_latest_done(RPIROH_ASYNC *aop, IrohAsyncState state
     if (state != IROH_ASYNC_READY) {
         err_msg = iroh_async_get_error(aop->handle);
         iroh_free_async_op(aop);
-        iroh_fire_error(ictx, err_msg ? err_msg : "docs getLatest failed");
+        iroh_fire_error(ictx, err_msg ? err_msg : "docs getAttr failed");
         if (err_msg) iroh_string_free(err_msg);
         return;
     }
@@ -1752,11 +1753,52 @@ static void iroh_on_docs_get_latest_done(RPIROH_ASYNC *aop, IrohAsyncState state
             }
             if (duk_pcall_method(ctx, 1) != 0) {
                 const char *errmsg = rp_push_error(ctx, -1, NULL, rp_print_error_lines);
-                fprintf(stderr, "Error in docs.getLatest callback:\n%s\n", errmsg);
+                fprintf(stderr, "Error in docs.getAttr callback:\n%s\n", errmsg);
                 duk_pop_2(ctx);
             } else duk_pop(ctx);
         }
         if (data) iroh_bytes_free(data, len);
+    }
+}
+
+static void iroh_on_docs_get_all_done(RPIROH_ASYNC *aop, IrohAsyncState state)
+{
+    RPIROH *ictx = aop->ictx;
+    duk_context *ctx = ictx->ctx;
+    uint32_t cb_id = (uint32_t)(uintptr_t)aop->aux;
+    char *err_msg = NULL;
+
+    if (state != IROH_ASYNC_READY) {
+        err_msg = iroh_async_get_error(aop->handle);
+        iroh_free_async_op(aop);
+        iroh_fire_error(ictx, err_msg ? err_msg : "docs getAll failed");
+        if (err_msg) iroh_string_free(err_msg);
+        return;
+    }
+
+    {
+        size_t count = 0;
+        IrohKeyValuePair *pairs = iroh_docs_get_all_result(aop->handle, &count);
+        iroh_free_async_op(aop);
+
+        if (iroh_prep_cb(ctx, ictx, cb_id)) {
+            duk_push_object(ctx);
+            for (size_t i = 0; i < count; i++) {
+                if (pairs[i].value && pairs[i].value_len > 0) {
+                    void *buf = duk_push_buffer(ctx, pairs[i].value_len, 0);
+                    memcpy(buf, pairs[i].value, pairs[i].value_len);
+                } else {
+                    duk_push_null(ctx);
+                }
+                duk_put_prop_string(ctx, -2, pairs[i].key);
+            }
+            if (duk_pcall_method(ctx, 1) != 0) {
+                const char *errmsg = rp_push_error(ctx, -1, NULL, rp_print_error_lines);
+                fprintf(stderr, "Error in docs.getAll callback:\n%s\n", errmsg);
+                duk_pop_2(ctx);
+            } else duk_pop(ctx);
+        }
+        if (pairs) iroh_key_value_pairs_free(pairs, count);
     }
 }
 
@@ -1843,6 +1885,7 @@ static void iroh_dispatch_result(RPIROH_ASYNC *aop, IrohAsyncState state)
         case IROH_OP_DOCS_SET:             iroh_on_docs_set_done(aop, state); break;
         case IROH_OP_DOCS_GET:             iroh_on_docs_get_done(aop, state); break;
         case IROH_OP_DOCS_GET_LATEST:      iroh_on_docs_get_latest_done(aop, state); break;
+        case IROH_OP_DOCS_GET_ALL:         iroh_on_docs_get_all_done(aop, state); break;
         case IROH_OP_DOCS_DELETE:          iroh_on_docs_delete_done(aop, state); break;
         case IROH_OP_DOCS_CREATE_TICKET:   iroh_on_docs_ticket_created(aop, state); break;
         case IROH_OP_DOCS_JOIN:            iroh_on_docs_joined(aop, state); break;
@@ -2857,11 +2900,9 @@ static duk_ret_t duk_rp_iroh_docs_create_doc(duk_context *ctx)
 
 static duk_ret_t duk_rp_iroh_docs_set(duk_context *ctx)
 {
-    const char *ns_str, *author_str, *key;
+    const char *ns_str, *author_str;
     IrohNamespaceId *ns;
     IrohAuthorId *author;
-    const uint8_t *value;
-    duk_size_t vlen;
     void *aux = NULL;
     IrohAsyncHandle *h;
 
@@ -2870,32 +2911,113 @@ static duk_ret_t duk_rp_iroh_docs_set(duk_context *ctx)
 
     ns_str = REQUIRE_STRING(ctx, 0, "docs.set: arg 1 must be namespace ID string");
     author_str = REQUIRE_STRING(ctx, 1, "docs.set: arg 2 must be author ID string");
-    key = REQUIRE_STRING(ctx, 2, "docs.set: arg 3 must be key string");
-
-    if (duk_is_string(ctx, 3)) {
-        value = (const uint8_t *)duk_get_lstring(ctx, 3, &vlen);
-    } else if (duk_is_buffer_data(ctx, 3)) {
-        value = (const uint8_t *)duk_get_buffer_data(ctx, 3, &vlen);
-    } else {
-        RP_THROW(ctx, "docs.set: arg 4 must be a string or buffer (value)");
-        return 0;
-    }
 
     ns = iroh_namespace_id_from_string(ns_str);
     if (!ns) RP_THROW(ctx, "docs.set: invalid namespace ID");
     author = iroh_author_id_from_string(author_str);
     if (!author) { iroh_namespace_id_free(ns); RP_THROW(ctx, "docs.set: invalid author ID"); }
 
-    if (duk_is_function(ctx, 4)) {
-        uint32_t cb_id = iroh_store_cb(ctx, ictx, 4);
-        aux = (void *)(uintptr_t)cb_id;
-    }
+    if (rp_gettype(ctx, 2) == RP_TYPE_OBJECT) {
+        /* Object form: docs.set(nsId, authorId, {key: val, ...}, callback) */
+        const char **keys = NULL;
+        const uint8_t **values = NULL;
+        size_t *value_lens = NULL;
+        size_t count = 0, cap = 8;
+        keys = (const char **)malloc(cap * sizeof(const char *));
+        values = (const uint8_t **)malloc(cap * sizeof(const uint8_t *));
+        value_lens = (size_t *)malloc(cap * sizeof(size_t));
+        if (!keys || !values || !value_lens) {
+            free(keys); free(values); free(value_lens);
+            iroh_namespace_id_free(ns); iroh_author_id_free(author);
+            RP_THROW(ctx, "docs.set: allocation failed");
+        }
 
-    h = iroh_docs_set(ictx->docs, ns, author, key, value, (size_t)vlen);
-    iroh_namespace_id_free(ns);
-    iroh_author_id_free(author);
-    if (!h) RP_THROW(ctx, "docs.set: failed");
-    iroh_start_async(ictx, h, IROH_OP_DOCS_SET, aux);
+        duk_enum(ctx, 2, DUK_ENUM_OWN_PROPERTIES_ONLY);
+        while (duk_next(ctx, -1, 1 /* get value */)) {
+            const char *k = duk_get_string(ctx, -2);
+            const uint8_t *v;
+            duk_size_t vlen;
+
+            if (duk_is_string(ctx, -1)) {
+                v = (const uint8_t *)duk_get_lstring(ctx, -1, &vlen);
+            } else if (duk_is_buffer_data(ctx, -1)) {
+                v = (const uint8_t *)duk_get_buffer_data(ctx, -1, &vlen);
+            } else {
+                duk_pop_3(ctx); /* value, key, enum */
+                free(keys); free(values); free(value_lens);
+                iroh_namespace_id_free(ns); iroh_author_id_free(author);
+                RP_THROW(ctx, "docs.set: object values must be strings or buffers");
+            }
+
+            if (count >= cap) {
+                cap *= 2;
+                keys = (const char **)realloc(keys, cap * sizeof(const char *));
+                values = (const uint8_t **)realloc(values, cap * sizeof(const uint8_t *));
+                value_lens = (size_t *)realloc(value_lens, cap * sizeof(size_t));
+                if (!keys || !values || !value_lens) {
+                    free(keys); free(values); free(value_lens);
+                    duk_pop_3(ctx);
+                    iroh_namespace_id_free(ns); iroh_author_id_free(author);
+                    RP_THROW(ctx, "docs.set: reallocation failed");
+                }
+            }
+
+            keys[count] = k;
+            values[count] = v;
+            value_lens[count] = (size_t)vlen;
+            count++;
+            duk_pop_2(ctx); /* pop key and value */
+        }
+        duk_pop(ctx); /* pop enum */
+
+        if (count == 0) {
+            free(keys); free(values); free(value_lens);
+            iroh_namespace_id_free(ns); iroh_author_id_free(author);
+            RP_THROW(ctx, "docs.set: object must have at least one property");
+        }
+
+        if (duk_is_function(ctx, 3)) {
+            uint32_t cb_id = iroh_store_cb(ctx, ictx, 3);
+            aux = (void *)(uintptr_t)cb_id;
+        }
+
+        h = iroh_docs_set_multi(ictx->docs, ns, author, keys, values, value_lens, count);
+        free(keys); free(values); free(value_lens);
+        iroh_namespace_id_free(ns);
+        iroh_author_id_free(author);
+        if (!h) RP_THROW(ctx, "docs.set: failed");
+        iroh_start_async(ictx, h, IROH_OP_DOCS_SET, aux);
+    } else if (duk_is_string(ctx, 2)) {
+        /* Single form: docs.set(nsId, authorId, key, value, callback) */
+        const char *key = duk_get_string(ctx, 2);
+        const uint8_t *value;
+        duk_size_t vlen;
+
+        if (duk_is_string(ctx, 3)) {
+            value = (const uint8_t *)duk_get_lstring(ctx, 3, &vlen);
+        } else if (duk_is_buffer_data(ctx, 3)) {
+            value = (const uint8_t *)duk_get_buffer_data(ctx, 3, &vlen);
+        } else {
+            iroh_namespace_id_free(ns); iroh_author_id_free(author);
+            RP_THROW(ctx, "docs.set: arg 4 must be a string or buffer (value)");
+            return 0;
+        }
+
+        if (duk_is_function(ctx, 4)) {
+            uint32_t cb_id = iroh_store_cb(ctx, ictx, 4);
+            aux = (void *)(uintptr_t)cb_id;
+        }
+
+        h = iroh_docs_set(ictx->docs, ns, author, key, value, (size_t)vlen);
+        iroh_namespace_id_free(ns);
+        iroh_author_id_free(author);
+        if (!h) RP_THROW(ctx, "docs.set: failed");
+        iroh_start_async(ictx, h, IROH_OP_DOCS_SET, aux);
+    } else {
+        iroh_namespace_id_free(ns);
+        iroh_author_id_free(author);
+        RP_THROW(ctx, "docs.set: arg 3 must be a key string or an object of key-value pairs");
+    }
 
     duk_push_this(ctx);
     return 1;
@@ -2943,14 +3065,14 @@ static duk_ret_t duk_rp_iroh_docs_get_latest(duk_context *ctx)
     void *aux = NULL;
     IrohAsyncHandle *h;
 
-    GET_ICTX(ctx, ictx, "docs.getLatest: not initialized");
-    if (!ictx->docs) RP_THROW(ctx, "docs.getLatest: docs not ready");
+    GET_ICTX(ctx, ictx, "docs.getAttr: not initialized");
+    if (!ictx->docs) RP_THROW(ctx, "docs.getAttr: docs not ready");
 
-    ns_str = REQUIRE_STRING(ctx, 0, "docs.getLatest: arg 1 must be namespace ID string");
-    key = REQUIRE_STRING(ctx, 1, "docs.getLatest: arg 2 must be key string");
+    ns_str = REQUIRE_STRING(ctx, 0, "docs.getAttr: arg 1 must be namespace ID string");
+    key = REQUIRE_STRING(ctx, 1, "docs.getAttr: arg 2 must be key string");
 
     ns = iroh_namespace_id_from_string(ns_str);
-    if (!ns) RP_THROW(ctx, "docs.getLatest: invalid namespace ID");
+    if (!ns) RP_THROW(ctx, "docs.getAttr: invalid namespace ID");
 
     if (duk_is_function(ctx, 2)) {
         uint32_t cb_id = iroh_store_cb(ctx, ictx, 2);
@@ -2959,8 +3081,37 @@ static duk_ret_t duk_rp_iroh_docs_get_latest(duk_context *ctx)
 
     h = iroh_docs_get_latest(ictx->docs, ns, key);
     iroh_namespace_id_free(ns);
-    if (!h) RP_THROW(ctx, "docs.getLatest: failed");
+    if (!h) RP_THROW(ctx, "docs.getAttr: failed");
     iroh_start_async(ictx, h, IROH_OP_DOCS_GET_LATEST, aux);
+
+    duk_push_this(ctx);
+    return 1;
+}
+
+static duk_ret_t duk_rp_iroh_docs_get_all(duk_context *ctx)
+{
+    const char *ns_str;
+    IrohNamespaceId *ns;
+    void *aux = NULL;
+    IrohAsyncHandle *h;
+
+    GET_ICTX(ctx, ictx, "docs.getAll: not initialized");
+    if (!ictx->docs) RP_THROW(ctx, "docs.getAll: docs not ready");
+
+    ns_str = REQUIRE_STRING(ctx, 0, "docs.getAll: arg 1 must be namespace ID string");
+
+    ns = iroh_namespace_id_from_string(ns_str);
+    if (!ns) RP_THROW(ctx, "docs.getAll: invalid namespace ID");
+
+    if (duk_is_function(ctx, 1)) {
+        uint32_t cb_id = iroh_store_cb(ctx, ictx, 1);
+        aux = (void *)(uintptr_t)cb_id;
+    }
+
+    h = iroh_docs_get_all(ictx->docs, ns);
+    iroh_namespace_id_free(ns);
+    if (!h) RP_THROW(ctx, "docs.getAll: failed");
+    iroh_start_async(ictx, h, IROH_OP_DOCS_GET_ALL, aux);
 
     duk_push_this(ctx);
     return 1;
@@ -3233,7 +3384,9 @@ duk_ret_t duk_open_module(duk_context *ctx)
         duk_push_c_function(ctx, duk_rp_iroh_docs_get, 4);
         duk_put_prop_string(ctx, proto_idx, "get");
         duk_push_c_function(ctx, duk_rp_iroh_docs_get_latest, 3);
-        duk_put_prop_string(ctx, proto_idx, "getLatest");
+        duk_put_prop_string(ctx, proto_idx, "getAttr");
+        duk_push_c_function(ctx, duk_rp_iroh_docs_get_all, 2);
+        duk_put_prop_string(ctx, proto_idx, "getAll");
         duk_push_c_function(ctx, duk_rp_iroh_docs_delete, 4);
         duk_put_prop_string(ctx, proto_idx, "delete");
         duk_push_c_function(ctx, duk_rp_iroh_docs_ticket, 2);

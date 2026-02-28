@@ -421,7 +421,7 @@ function runDocsTest(callback) {
     var createDocOk = false;
     var setOk = false;
     var getOk = false;
-    var getLatestOk = false;
+    var getAttrOk = false;
     var deleteOk = false;
     var syncOk = false;
 
@@ -456,12 +456,12 @@ function runDocsTest(callback) {
                                 getOk = (bufToStr(data) === DOC_VAL);
                                 testFeature("docs - get returns correct value", getOk);
 
-                                docs1.getLatest(nsId, DOC_KEY, function(data2) {
-                                    getLatestOk = (bufToStr(data2) === DOC_VAL);
-                                    testFeature("docs - getLatest returns correct value", getLatestOk);
+                                docs1.getAttr(nsId, DOC_KEY, function(data2) {
+                                    getAttrOk = (bufToStr(data2) === DOC_VAL);
+                                    testFeature("docs - getAttr returns correct value", getAttrOk);
 
                                     docs1.delete(nsId, authorId, DOC_KEY2, function() {
-                                        docs1.getLatest(nsId, DOC_KEY2, function(data3) {
+                                        docs1.getAttr(nsId, DOC_KEY2, function(data3) {
                                             deleteOk = (bufToStr(data3) === null);
                                             testFeature("docs - delete removes key", deleteOk);
 
@@ -506,7 +506,7 @@ function startDocsNode2(ticket, docs1, callback) {
             docs2.join(ticket, function(nsId) {
                 testFeature("docs - node2 joins via ticket", typeof nsId === 'string' && nsId.length > 0);
 
-                docs2.getLatest(nsId, DOC_KEY, function(data) {
+                docs2.getAttr(nsId, DOC_KEY, function(data) {
                     var val = bufToStr(data);
                     testFeature("docs - node2 reads synced value", val === DOC_VAL);
                     callback();
@@ -514,6 +514,90 @@ function startDocsNode2(ticket, docs1, callback) {
             });
         });
     });
+}
+
+/* ================================================================
+   Test 7: Docs set with object (multi-set)
+   ================================================================ */
+
+var MULTI_SET_OBJ = {"name": "Alice", "status": "online", "color": "blue"};
+
+function runDocsMultiSetTest(callback) {
+    var multiSetOk = false;
+    var allReadOk = false;
+
+    var ep = new iroh.Endpoint();
+
+    ep.on("error", function(err) {
+        testFeature("docs multi-set - no errors", false);
+    });
+
+    ep.on("online", function() {
+        var docs = new iroh.Docs(ep);
+
+        docs.on("error", function(err) {
+            testFeature("docs multi-set - docs no errors", false);
+        });
+
+        docs.on("ready", function() {
+            docs.createAuthor(function(authorId) {
+                docs.createDoc(function(nsId) {
+
+                    /* Use object form to set multiple key-value pairs at once */
+                    docs.set(nsId, authorId, MULTI_SET_OBJ, function() {
+                        multiSetOk = true;
+                        testFeature("docs - set with object", true);
+
+                        /* Verify all three keys were set */
+                        docs.getAttr(nsId, "name", function(data) {
+                            testFeature("docs multi-set - name correct",
+                                bufToStr(data) === "Alice");
+
+                            docs.getAttr(nsId, "status", function(data) {
+                                testFeature("docs multi-set - status correct",
+                                    bufToStr(data) === "online");
+
+                                docs.getAttr(nsId, "color", function(data) {
+                                    testFeature("docs multi-set - color correct",
+                                        bufToStr(data) === "blue");
+
+                                    /* Also verify single-key set still works alongside */
+                                    docs.set(nsId, authorId, "extra", "value", function() {
+                                        docs.getAttr(nsId, "extra", function(data) {
+                                            testFeature("docs - single set still works after multi-set",
+                                                bufToStr(data) === "value");
+
+                                            /* Test getAll — should return all 4 keys as an object */
+                                            docs.getAll(nsId, function(obj) {
+                                                testFeature("docs - getAll returns object",
+                                                    typeof obj === 'object' && obj !== null);
+                                                testFeature("docs - getAll has name",
+                                                    bufToStr(obj.name) === "Alice");
+                                                testFeature("docs - getAll has status",
+                                                    bufToStr(obj.status) === "online");
+                                                testFeature("docs - getAll has color",
+                                                    bufToStr(obj.color) === "blue");
+                                                testFeature("docs - getAll has extra",
+                                                    bufToStr(obj.extra) === "value");
+                                                allReadOk = true;
+                                                callback();
+                                            });
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    });
+
+    setTimeout(function() {
+        if (!allReadOk) {
+            testFeature("docs multi-set test (timeout)", false);
+        }
+    }, 25000);
 }
 
 /* ================================================================
@@ -531,7 +615,9 @@ runCloseTest(function() {
         runGossipTest(function() {
             runBlobsTest(function() {
                 runDocsTest(function() {
-                    allDone();
+                    runDocsMultiSetTest(function() {
+                        allDone();
+                    });
                 });
             });
         });

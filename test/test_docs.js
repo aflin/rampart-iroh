@@ -71,25 +71,25 @@ ep1.on("online", function() {
                             }
                             console.log("Node 1: get() verified OK");
 
-                            // Read back with getLatest(ns, key)
-                            docs1.getLatest(nsId, TEST_KEY, function(data2) {
+                            // Read back with getAttr(ns, key)
+                            docs1.getAttr(nsId, TEST_KEY, function(data2) {
                                 var val2 = bufToStr(data2);
-                                console.log("Node 1: getLatest() returned:", val2);
+                                console.log("Node 1: getAttr() returned:", val2);
                                 if (val2 !== TEST_VALUE) {
-                                    console.log("ERROR: getLatest() mismatch!");
+                                    console.log("ERROR: getAttr() mismatch!");
                                     console.log("  Expected:", TEST_VALUE);
                                     console.log("  Got:", val2);
                                     process.exit(1);
                                 }
-                                console.log("Node 1: getLatest() verified OK");
+                                console.log("Node 1: getAttr() verified OK");
 
                                 // Delete key2 and verify it's gone
                                 docs1.delete(nsId, authorId, TEST_KEY2, function() {
                                     console.log("Node 1: Deleted '" + TEST_KEY2 + "'");
 
-                                    docs1.getLatest(nsId, TEST_KEY2, function(data3) {
+                                    docs1.getAttr(nsId, TEST_KEY2, function(data3) {
                                         var val3 = bufToStr(data3);
-                                        console.log("Node 1: getLatest('" + TEST_KEY2 + "') after delete:", val3);
+                                        console.log("Node 1: getAttr('" + TEST_KEY2 + "') after delete:", val3);
                                         if (val3 !== null) {
                                             console.log("ERROR: deleted key still returns data!");
                                             process.exit(1);
@@ -147,13 +147,13 @@ function startNode2(ticket, docs1) {
 
                 // Try to read the synced data
                 console.log("Node 2: Reading synced data...");
-                docs2.getLatest(nsId, TEST_KEY, function(data) {
+                docs2.getAttr(nsId, TEST_KEY, function(data) {
                     var val = bufToStr(data);
-                    console.log("Node 2: getLatest('" + TEST_KEY + "') =", val);
+                    console.log("Node 2: getAttr('" + TEST_KEY + "') =", val);
 
                     if (val === TEST_VALUE) {
                         console.log("\n=== DOCS TEST PASSED ===");
-                        console.log("  Single-node set/get/getLatest/delete: OK");
+                        console.log("  Single-node set/get/getAttr/delete: OK");
                         console.log("  Two-node join and sync: OK");
                         console.log("  Synced value:", val);
                         process.exit(0);

@@ -2451,6 +2451,81 @@ pub extern "C" fn iroh_docs_set(
     handle_ptr as *mut IrohAsyncHandle
 }
 
+/// Set multiple entries in a document from parallel arrays of keys and values
+#[no_mangle]
+pub extern "C" fn iroh_docs_set_multi(
+    docs: *const IrohDocs,
+    namespace: *const IrohNamespaceId,
+    author: *const IrohAuthorId,
+    keys: *const *const c_char,
+    values: *const *const u8,
+    value_lens: *const usize,
+    count: usize,
+) -> *mut IrohAsyncHandle {
+    if docs.is_null() || namespace.is_null() || author.is_null() || keys.is_null() || values.is_null() || value_lens.is_null() {
+        set_last_error("NULL argument");
+        return ptr::null_mut();
+    }
+    if count == 0 { set_last_error("count must be > 0"); return ptr::null_mut(); }
+
+    let runtime = match get_runtime() { Some(rt) => rt, None => { set_last_error("Runtime not initialized"); return ptr::null_mut(); } };
+    let handle = match IrohAsyncHandle::new() { Ok(h) => h, Err(_) => { set_last_error("Failed to create async handle"); return ptr::null_mut(); } };
+    let handle_clone = handle.clone();
+    let handle_ptr = Arc::into_raw(handle);
+
+    let docs = unsafe { (*docs).docs.clone() };
+    let namespace = unsafe { (*namespace).0 };
+    let author = unsafe { (*author).0 };
+
+    // Copy all keys and values into owned Vecs before moving into the async block
+    let mut entries: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(count);
+    for i in 0..count {
+        unsafe {
+            let key_ptr = *keys.add(i);
+            if key_ptr.is_null() {
+                set_last_error("NULL key pointer");
+                // Free the handle we allocated
+                let _ = Arc::from_raw(handle_ptr);
+                return ptr::null_mut();
+            }
+            let key_bytes = CStr::from_ptr(key_ptr).to_bytes().to_vec();
+            let val_ptr = *values.add(i);
+            let val_len = *value_lens.add(i);
+            let val_bytes = if val_len > 0 {
+                if val_ptr.is_null() {
+                    set_last_error("NULL value pointer with non-zero length");
+                    let _ = Arc::from_raw(handle_ptr);
+                    return ptr::null_mut();
+                }
+                std::slice::from_raw_parts(val_ptr, val_len).to_vec()
+            } else {
+                Vec::new()
+            };
+            entries.push((key_bytes, val_bytes));
+        }
+    }
+
+    runtime.spawn(async move {
+        match docs.open(namespace).await {
+            Ok(Some(doc)) => {
+                for (key_bytes, value_bytes) in entries {
+                    match doc.set_bytes(author, key_bytes, value_bytes).await {
+                        Ok(_hash) => {}
+                        Err(e) => {
+                            handle_clone.complete_with_error(format!("Failed to set entry: {}", e));
+                            return;
+                        }
+                    }
+                }
+                handle_clone.complete_with_result(());
+            }
+            Ok(None) => { handle_clone.complete_with_error("Document not found".to_string()); }
+            Err(e) => { handle_clone.complete_with_error(format!("Failed to open doc: {}", e)); }
+        }
+    });
+    handle_ptr as *mut IrohAsyncHandle
+}
+
 /// Check if a set operation completed successfully
 #[no_mangle]
 pub extern "C" fn iroh_docs_set_result(handle: *mut IrohAsyncHandle) -> IrohError {
@@ -2693,6 +2768,147 @@ pub extern "C" fn iroh_docs_get_latest(
 #[no_mangle]
 pub extern "C" fn iroh_docs_get_latest_result(handle: *mut IrohAsyncHandle, out_len: *mut usize) -> *mut u8 {
     iroh_docs_get_result(handle, out_len)
+}
+
+/// Key-value pair returned by get_all
+#[repr(C)]
+pub struct IrohKeyValuePair {
+    pub key: *mut c_char,
+    pub value: *mut u8,
+    pub value_len: usize,
+}
+
+/// Get all latest entries from a document as key-value pairs
+#[no_mangle]
+pub extern "C" fn iroh_docs_get_all(
+    docs: *const IrohDocs,
+    namespace: *const IrohNamespaceId,
+) -> *mut IrohAsyncHandle {
+    if docs.is_null() || namespace.is_null() {
+        set_last_error("NULL argument");
+        return ptr::null_mut();
+    }
+
+    let runtime = match get_runtime() { Some(rt) => rt, None => { set_last_error("Runtime not initialized"); return ptr::null_mut(); } };
+    let handle = match IrohAsyncHandle::new() { Ok(h) => h, Err(_) => { set_last_error("Failed to create async handle"); return ptr::null_mut(); } };
+    let handle_clone = handle.clone();
+    let handle_ptr = Arc::into_raw(handle);
+
+    let docs_handle = unsafe { &(*docs) };
+    let docs = docs_handle.docs.clone();
+    let blobs_store = docs_handle.blobs_store.clone();
+    let namespace = unsafe { (*namespace).0 };
+
+    runtime.spawn(async move {
+        match docs.open(namespace).await {
+            Ok(Some(doc)) => {
+                let query = iroh_docs::store::Query::single_latest_per_key().build();
+                match doc.get_many(query).await {
+                    Ok(stream) => {
+                        use tokio::io::AsyncReadExt;
+                        use n0_future::StreamExt;
+                        let mut stream = std::pin::pin!(stream);
+                        let mut pairs: Vec<(String, Vec<u8>)> = Vec::new();
+                        while let Some(entry_result) = stream.next().await {
+                            match entry_result {
+                                Ok(entry) => {
+                                    let key = String::from_utf8_lossy(entry.key()).to_string();
+                                    let hash = entry.content_hash();
+                                    match blobs_store.has(hash).await {
+                                        Ok(true) => {
+                                            let mut reader = blobs_store.reader(hash);
+                                            let mut content = Vec::new();
+                                            match reader.read_to_end(&mut content).await {
+                                                Ok(_) => { pairs.push((key, content)); }
+                                                Err(e) => {
+                                                    handle_clone.complete_with_error(format!("Failed to read content for key '{}': {}", key, e));
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        Ok(false) => {
+                                            // Skip entries whose content hasn't been downloaded yet
+                                        }
+                                        Err(e) => {
+                                            handle_clone.complete_with_error(format!("Failed to check content for key '{}': {}", key, e));
+                                            return;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    handle_clone.complete_with_error(format!("Failed to read entry: {}", e));
+                                    return;
+                                }
+                            }
+                        }
+                        handle_clone.complete_with_result(pairs);
+                    }
+                    Err(e) => { handle_clone.complete_with_error(format!("Failed to query entries: {}", e)); }
+                }
+            }
+            Ok(None) => { handle_clone.complete_with_error("Document not found".to_string()); }
+            Err(e) => { handle_clone.complete_with_error(format!("Failed to open doc: {}", e)); }
+        }
+    });
+    handle_ptr as *mut IrohAsyncHandle
+}
+
+/// Get the result of a get_all operation — returns array of key-value pairs
+#[no_mangle]
+pub extern "C" fn iroh_docs_get_all_result(handle: *mut IrohAsyncHandle, out_count: *mut usize) -> *mut IrohKeyValuePair {
+    if handle.is_null() { return ptr::null_mut(); }
+    if !out_count.is_null() { unsafe { *out_count = 0; } }
+
+    let pairs = unsafe { (*handle).take_result::<Vec<(String, Vec<u8>)>>() };
+    match pairs {
+        Some(pairs) => {
+            let count = pairs.len();
+            if count == 0 {
+                if !out_count.is_null() { unsafe { *out_count = 0; } }
+                return ptr::null_mut();
+            }
+            let mut c_pairs: Vec<IrohKeyValuePair> = Vec::with_capacity(count);
+            for (key, value) in pairs {
+                let c_key = CString::new(key).unwrap_or_default();
+                let val_len = value.len();
+                let val_ptr = if val_len > 0 {
+                    let mut b = value.into_boxed_slice();
+                    let p = b.as_mut_ptr();
+                    std::mem::forget(b);
+                    p
+                } else {
+                    ptr::null_mut()
+                };
+                c_pairs.push(IrohKeyValuePair {
+                    key: c_key.into_raw(),
+                    value: val_ptr,
+                    value_len: val_len,
+                });
+            }
+            let mut boxed = c_pairs.into_boxed_slice();
+            let ptr = boxed.as_mut_ptr();
+            std::mem::forget(boxed);
+            if !out_count.is_null() { unsafe { *out_count = count; } }
+            ptr
+        }
+        None => ptr::null_mut(),
+    }
+}
+
+/// Free key-value pairs returned by iroh_docs_get_all_result
+#[no_mangle]
+pub extern "C" fn iroh_key_value_pairs_free(pairs: *mut IrohKeyValuePair, count: usize) {
+    if pairs.is_null() || count == 0 { return; }
+    unsafe {
+        let slice = std::slice::from_raw_parts_mut(pairs, count);
+        for pair in slice.iter_mut() {
+            if !pair.key.is_null() { drop(CString::from_raw(pair.key)); }
+            if !pair.value.is_null() && pair.value_len > 0 {
+                let _ = Vec::from_raw_parts(pair.value, pair.value_len, pair.value_len);
+            }
+        }
+        let _ = Box::from_raw(std::slice::from_raw_parts_mut(pairs, count) as *mut [IrohKeyValuePair]);
+    }
 }
 
 /// Delete an entry from a document

@@ -766,6 +766,16 @@ extern "C"
         const uint8_t *value,
         size_t value_len);
 
+    /** Set multiple entries in a document from parallel arrays of keys and values. */
+    IrohAsyncHandle *iroh_docs_set_multi(
+        const IrohDocs *docs,
+        const IrohNamespaceId *namespace_id,
+        const IrohAuthorId *author,
+        const char **keys,
+        const uint8_t **values,
+        const size_t *value_lens,
+        size_t count);
+
     /** Check if a set operation completed successfully. */
     IrohError iroh_docs_set_result(IrohAsyncHandle *handle);
 
@@ -815,6 +825,24 @@ extern "C"
 
     /** Get the value from a completed get_latest operation. Free with iroh_bytes_free(). */
     uint8_t *iroh_docs_get_latest_result(IrohAsyncHandle *handle, size_t *out_len);
+
+    /** Key-value pair returned by iroh_docs_get_all. */
+    typedef struct {
+        char *key;
+        uint8_t *value;
+        size_t value_len;
+    } IrohKeyValuePair;
+
+    /** Get all latest entries from a document as key-value pairs. */
+    IrohAsyncHandle *iroh_docs_get_all(
+        const IrohDocs *docs,
+        const IrohNamespaceId *namespace_id);
+
+    /** Get the result of a get_all operation. Free with iroh_key_value_pairs_free(). */
+    IrohKeyValuePair *iroh_docs_get_all_result(IrohAsyncHandle *handle, size_t *out_count);
+
+    /** Free key-value pairs returned by iroh_docs_get_all_result. */
+    void iroh_key_value_pairs_free(IrohKeyValuePair *pairs, size_t count);
 
     /** Delete an entry from a document. */
     IrohAsyncHandle *iroh_docs_delete(
