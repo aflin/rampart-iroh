@@ -481,11 +481,11 @@ blobs.addFile("/path/to/file.txt", function(result) {
 Read a blob's content from the local store.
 
 - **hash** (String) -- The BLAKE3 hash of the blob.
-- **callback** (Function) -- Called with the data as a String.
+- **callback** (Function) -- Called with the data as a Buffer.
 
 ```javascript
 blobs.read(hash, function(data) {
-    console.log("Content:", data);
+    rampart.utils.printf("Content: '%s'\n", data);
 });
 ```
 
@@ -502,7 +502,7 @@ Download a blob from a remote node using a transfer ticket.
 blobs.download(ticket, function(hash) {
     console.log("Downloaded:", hash);
     blobs.read(hash, function(data) {
-        console.log("Content:", data);
+        rampart.utils.printf("Content: '%s'\n", data);
     });
 });
 ```

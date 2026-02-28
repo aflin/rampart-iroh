@@ -1521,7 +1521,6 @@ static void iroh_on_blobs_read(RPIROH_ASYNC *aop, IrohAsyncState state)
             if (data && len > 0) {
                 void *buf = duk_push_buffer(ctx, len, 0);
                 memcpy(buf, data, len);
-                duk_buffer_to_string(ctx, -1);
             } else {
                 duk_push_null(ctx);
             }

@@ -354,7 +354,7 @@ function runBlobsTest(callback) {
                 testFeature("blobs - addBytes returns hash+ticket", storedOk);
 
                 blobs1.read(result.hash, function(data) {
-                    localReadOk = (data === BLOB_DATA);
+                    localReadOk = (bufferToString(data) === BLOB_DATA);
                     testFeature("blobs - local read matches", localReadOk);
 
                     /* Node 2 downloads */
@@ -377,7 +377,7 @@ function runBlobsTest(callback) {
                                 testFeature("blobs - download returns hash", downloadOk);
 
                                 blobs2.read(hash, function(data2) {
-                                    remoteReadOk = (data2 === BLOB_DATA);
+                                    remoteReadOk = (bufferToString(data2) === BLOB_DATA);
                                     testFeature("blobs - remote read matches", remoteReadOk);
                                     callback();
                                 });
