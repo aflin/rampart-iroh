@@ -87,8 +87,15 @@ ifeq ($(LIBEVENT_LIBS),)
 	endif
 endif
 
-# Examples
+# Test if libevent is actually usable (headers + library available)
+HAVE_LIBEVENT := $(shell printf '\#include <event2/event.h>\nint main(){return 0;}' | \
+    $(CC) -x c - -o /dev/null $(LIBEVENT_CFLAGS) $(LIBEVENT_LIBS) 2>/dev/null && echo yes)
+
+# Examples (only built if libevent is available)
 EXAMPLES := echo_server echo_client gossip_chat blob_transfer docs_kv docs_persistent blobs_persistent
+ifneq ($(HAVE_LIBEVENT),yes)
+    EXAMPLES :=
+endif
 
 # Module
 MODULE := rampart-iroh.so
@@ -119,6 +126,9 @@ $(MODULE): $(MODULE_DIR)/rampart-iroh.c $(TARGET_DIR)/$(MODULE_LINK_LIB)
 		$(SYS_LIBS)
 
 examples: lib $(EXAMPLES)
+ifneq ($(HAVE_LIBEVENT),yes)
+	@echo "Note: libevent2 not found — skipping example C programs"
+endif
 
 # Link with static library - order matters: object files, then static lib, then system libs
 echo_server: examples/echo_server.c
