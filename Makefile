@@ -46,6 +46,7 @@ else ifneq ($(filter MSYS_NT% MINGW64_NT% MINGW32_NT%,$(UNAME_S)),)
 	# MinGW gcc may be first on PATH (needed for cargo), but the module must
 	# link against msys-2.0.dll like rampart does.
 	CC := /c/tools/msys64/usr/bin/gcc.exe
+	CFLAGS := -Wall -Wextra -g -O2
 	DYLIB_EXT := so
 	STATIC_LIB := lib$(LIB_NAME).a
 	DYNAMIC_LIB := lib$(LIB_NAME).$(DYLIB_EXT)
