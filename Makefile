@@ -45,8 +45,12 @@ else ifneq ($(filter MSYS_NT% MINGW64_NT% MINGW32_NT%,$(UNAME_S)),)
 	# Use MSYS gcc (not MinGW gcc) for the module to match rampart's ABI.
 	# MinGW gcc may be first on PATH (needed for cargo), but the module must
 	# link against msys-2.0.dll like rampart does.
-	CC := /c/tools/msys64/usr/bin/gcc.exe
-	CFLAGS := -Wall -Wextra -g -O2
+	# Invoke gcc through MSYS2's login shell so it has the correct mount table, 
+	# system headers, and CRT libraries (Git Bash's /usr differs from MSYS2's).
+	MSYS2_SHELL := MSYSTEM=MSYS /c/tools/msys64/usr/bin/bash.exe -l -c
+	CC := $(MSYS2_SHELL) 'cd "$(CURDIR)" && gcc "$$@"' --
+	# Use gnu99 instead of c99: MSYS/POSIX needs GNU extensions (strdup, etc.)
+	CFLAGS := -Wall -Wextra -g -O2 -std=gnu99
 	DYLIB_EXT := so
 	STATIC_LIB := lib$(LIB_NAME).a
 	DYNAMIC_LIB := lib$(LIB_NAME).$(DYLIB_EXT)
@@ -101,7 +105,7 @@ endif
 # Module
 MODULE := rampart-iroh.so
 
-.PHONY: all lib module examples clean install
+.PHONY: all lib module examples clean install test
 
 all: lib module examples
 
@@ -200,6 +204,9 @@ endif
 		cp licenses/* '$(RAMPART_INSTALL)/licenses/'; \
 		echo "Installed license files to $(RAMPART_INSTALL)/licenses/"; \
 	fi
+
+test: module
+	PATH="$(CURDIR):$(TARGET_DIR):$$PATH" rampart iroh-test.js
 
 # Generate header file only
 header:
