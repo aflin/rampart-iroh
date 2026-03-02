@@ -4,7 +4,7 @@
 
 CARGO ?= cargo
 CC ?= gcc
-CFLAGS ?= -Wall -Wextra -g -O2
+CFLAGS ?= -Wall -Wextra -g -O2 -std=c99
 PKG_CONFIG ?= pkg-config
 
 # Rampart include path (auto-detect via rampart, fallback to default)
