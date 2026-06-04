@@ -16,7 +16,7 @@ function testFeature(name, test) {
             test = false;
         }
     }
-    printf("testing iroh - %3d - %-47s - ", testnum, name);
+    printf("testing iroh - %3d - %-70s - ", testnum, name);
     fflush(stdout);
     if (test)
         printf("passed\n");
