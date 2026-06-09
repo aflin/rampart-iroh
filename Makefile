@@ -105,7 +105,14 @@ MODULE := rampart-iroh.so
 all: lib module examples
 
 lib:
-	$(CARGO) build --release
+	# --locked: cargo MUST use the committed Cargo.lock verbatim, no resolver
+	# drift.  This is what guarantees the build is reproducible on any rustc:
+	# the pinned versions of ed25519-dalek, pkcs8, etc. compile against each
+	# other exactly because their committed pre/rc versions form an
+	# internally-consistent set.  Removing --locked (or running `cargo update`)
+	# lets cargo bump a transitive to a newer release where the API has
+	# changed, and the build breaks downstream.
+	$(CARGO) build --release --locked
 	@echo "Library built: $(TARGET_DIR)/$(STATIC_LIB)"
 	@echo "Library built: $(TARGET_DIR)/$(DYNAMIC_LIB)"
 
