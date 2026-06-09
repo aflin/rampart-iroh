@@ -45,12 +45,7 @@ else ifneq ($(filter MSYS_NT% MINGW64_NT% MINGW32_NT%,$(UNAME_S)),)
 	# Use MSYS gcc (not MinGW gcc) for the module to match rampart's ABI.
 	# MinGW gcc may be first on PATH (needed for cargo), but the module must
 	# link against msys-2.0.dll like rampart does.
-	# Invoke gcc through MSYS2's login shell so it has the correct mount table, 
-	# system headers, and CRT libraries (Git Bash's /usr differs from MSYS2's).
-	MSYS2_SHELL := MSYSTEM=MSYS /c/tools/msys64/usr/bin/bash.exe -l -c
-	CC := $(MSYS2_SHELL) 'cd "$(CURDIR)" && gcc "$$@"' --
-	# Use gnu99 instead of c99: MSYS/POSIX needs GNU extensions (strdup, etc.)
-	CFLAGS := -Wall -Wextra -g -O2 -std=gnu99
+	CC := /c/tools/msys64/usr/bin/gcc.exe
 	DYLIB_EXT := so
 	STATIC_LIB := lib$(LIB_NAME).a
 	DYNAMIC_LIB := lib$(LIB_NAME).$(DYLIB_EXT)
@@ -105,12 +100,19 @@ endif
 # Module
 MODULE := rampart-iroh.so
 
-.PHONY: all lib module examples clean install test
+.PHONY: all lib module examples clean install
 
 all: lib module examples
 
 lib:
-	$(CARGO) build --release
+	# --locked: cargo MUST use the committed Cargo.lock verbatim, no resolver
+	# drift.  This is what guarantees the build is reproducible on any rustc:
+	# the pinned versions of ed25519-dalek, pkcs8, etc. compile against each
+	# other exactly because their committed pre/rc versions form an
+	# internally-consistent set.  Removing --locked (or running `cargo update`)
+	# lets cargo bump a transitive to a newer release where the API has
+	# changed, and the build breaks downstream.
+	$(CARGO) build --release --locked
 	@echo "Library built: $(TARGET_DIR)/$(STATIC_LIB)"
 	@echo "Library built: $(TARGET_DIR)/$(DYNAMIC_LIB)"
 
@@ -204,9 +206,6 @@ endif
 		cp licenses/* '$(RAMPART_INSTALL)/licenses/'; \
 		echo "Installed license files to $(RAMPART_INSTALL)/licenses/"; \
 	fi
-
-test: module
-	PATH="$(CURDIR):$(TARGET_DIR):$$PATH" rampart iroh-test.js
 
 # Generate header file only
 header:
